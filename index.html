@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Chat App</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); width: 100%; max-width: 600px; }
+        h2, h3 { color: #333; text-align: center; }
+        .input-group { margin-bottom: 10px; }
+        input[type="text"], input[type="password"] { width: 90%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; }
+        button { background-color: #0084ff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 10px; font-weight: bold;}
+        button:hover { background-color: #006bce; }
+        
+        #dashboard-section, #chat-section { display: none; }
+        
+        .room-actions { background: #f9f9f9; padding: 15px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #eee; }
+        .room-actions h4 { margin-top: 0; margin-bottom: 10px; color: #555; }
+        .room-btn { background-color: #e4e6eb; color: black; margin-bottom: 5px; text-align: left; font-weight: bold;}
+        .room-btn:hover { background-color: #d8dadf; }
+
+        /* --- CHAT UI STYLING --- */
+        #messages { height: 400px; border: 1px solid #ddd; border-radius: 8px; overflow-y: scroll; padding: 15px; margin-bottom: 10px; background-color: #e5ddd5; display: flex; flex-direction: column; }
+        
+        .message-row { display: flex; width: 100%; margin-bottom: 10px; }
+        .message-box { max-width: 70%; padding: 8px 12px; border-radius: 8px; font-size: 0.95em; line-height: 1.4; word-wrap: break-word;}
+        
+        .other-message { background-color: white; border-top-left-radius: 0; align-self: flex-start; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
+        .other-message-row { justify-content: flex-start; }
+        
+        .my-message { background-color: #dcf8c6; border-top-right-radius: 0; align-self: flex-end; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
+        .my-message-row { justify-content: flex-end; }
+        
+        .system-msg { color: #555; background: #fffde7; padding: 4px 10px; border-radius: 12px; font-style: italic; text-align: center; font-size: 0.8em; margin: 10px auto; width: fit-content; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
+        .sender-name { font-size: 0.75em; font-weight: bold; color: #0084ff; margin-bottom: 3px; display: block; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    
+    <div id="auth-section">
+        <h2>Secure Login / Signup</h2>
+        <div class="input-group">
+            <input type="text" id="username" placeholder="Enter Username (e.g. rahul_123)">
+        </div>
+        <div class="input-group">
+            <input type="password" id="password" placeholder="Enter Password">
+        </div>
+        <button onclick="login()">Login</button>
+        <button onclick="signup()" style="background-color: #4CAF50;">Sign Up</button>
+        <p id="auth-error" style="color: red; text-align: center;"></p>
+    </div>
+
+    <div id="dashboard-section">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2>Dashboard</h2>
+            <button onclick="logout()" style="width: auto; background-color: #f44336; padding: 5px 10px;">Logout</button>
+        </div>
+        <p style="text-align: center;">Welcome, <b id="display-user"></b>!</p>
+        
+        <div class="room-actions">
+            <h4>Create a New Room</h4>
+            <input type="text" id="createRoomName" placeholder="Room Name">
+            <input type="password" id="createRoomKey" placeholder="Set a Secret Key">
+            <button onclick="createRoom()" style="background-color: #ff9800;">Create Room</button>
+        </div>
+
+        <div class="room-actions">
+            <h4>Join an Existing Room</h4>
+            <input type="text" id="joinRoomName" placeholder="Room Name">
+            <input type="password" id="joinRoomKey" placeholder="Room's Secret Key">
+            <button onclick="joinRoomAPI()" style="background-color: #2196F3;">Join Room</button>
+        </div>
+        
+        <h3>My Active Rooms</h3>
+        <div id="room-list"></div>
+    </div>
+
+    <div id="chat-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h2 id="room-title" style="margin: 0;">Room Name</h2>
+            <button onclick="leaveRoom()" style="width: auto; background-color: #f44336; padding: 8px 12px;">Back</button>
+        </div>
+        
+        <div id="messages"></div>
+        <form onsubmit="sendMessage(event)" style="display: flex; gap: 10px;">
+            <input type="text" id="messageText" autocomplete="off" placeholder="Type a message..." style="width: 80%;">
+            <button style="width: 20%;">Send</button>
+        </form>
+    </div>
+
+</div>
+
+<script>
+    let currentUser = "";
+    let ws = null;
+
+    // --- AUTHENTICATION ---
+    async function signup() {
+        const u = document.getElementById("username").value;
+        const p = document.getElementById("password").value;
+        try {
+            const res = await fetch("/signup", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username: u, password: p })
+            });
+            const data = await res.json();
+            if(res.ok) { alert(data.message); } else { document.getElementById("auth-error").innerText = data.detail; }
+        } catch (err) {
+            document.getElementById("auth-error").innerText = "Server not responding. Is backend running?";
+        }
+    }
+
+    async function login() {
+        const u = document.getElementById("username").value;
+        const p = document.getElementById("password").value;
+        try {
+            const res = await fetch("/login", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username: u, password: p })
+            });
+            const data = await res.json();
+            if(res.ok) {
+                currentUser = data.username;
+                document.getElementById("auth-section").style.display = "none";
+                document.getElementById("dashboard-section").style.display = "block";
+                document.getElementById("display-user").innerText = currentUser;
+                document.getElementById("password").value = ""; 
+                loadMyRooms();
+            } else {
+                document.getElementById("auth-error").innerText = data.detail;
+            }
+        } catch (err) {
+            document.getElementById("auth-error").innerText = "Server not responding. Is backend running?";
+        }
+    }
+
+    function logout() {
+        currentUser = "";
+        document.getElementById("dashboard-section").style.display = "none";
+        document.getElementById("auth-section").style.display = "block";
+        document.getElementById("auth-error").innerText = "";
+    }
+
+    // --- DASHBOARD LOGIC ---
+    async function loadMyRooms() {
+        const res = await fetch(`/rooms/${currentUser}`);
+        const rooms = await res.json();
+        const list = document.getElementById("room-list");
+        list.innerHTML = "";
+        
+        if (rooms.length === 0) {
+            list.innerHTML = "<p style='color: gray; text-align: center;'>You haven't joined any rooms yet.</p>";
+            return;
+        }
+        rooms.forEach(room => {
+            const btn = document.createElement("button");
+            btn.className = "room-btn";
+            btn.innerText = "📁 Enter: " + room.room_name;
+            btn.onclick = () => enterChat(room.room_name);
+            list.appendChild(btn);
+        });
+    }
+
+    async function createRoom() {
+        const rName = document.getElementById("createRoomName").value;
+        const rKey = document.getElementById("createRoomKey").value;
+        if(!rName || !rKey) return alert("Please fill both fields");
+        const res = await fetch("/rooms/create", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser })
+        });
+        if(res.ok) { document.getElementById("createRoomName").value = ""; document.getElementById("createRoomKey").value = ""; loadMyRooms(); }
+        else { alert((await res.json()).detail); }
+    }
+
+    async function joinRoomAPI() {
+        const rName = document.getElementById("joinRoomName").value;
+        const rKey = document.getElementById("joinRoomKey").value;
+        if(!rName || !rKey) return alert("Please fill both fields");
+        const res = await fetch("/rooms/join", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser })
+        });
+        if(res.ok) { document.getElementById("joinRoomName").value = ""; document.getElementById("joinRoomKey").value = ""; loadMyRooms(); }
+        else { alert((await res.json()).detail); }
+    }
+
+    // --- SMART CHAT LOGIC ---
+    function enterChat(roomName) {
+        document.getElementById("dashboard-section").style.display = "none";
+        document.getElementById("chat-section").style.display = "block";
+        document.getElementById("room-title").innerText = roomName;
+        document.getElementById("messages").innerHTML = ""; 
+        
+        ws = new WebSocket(`ws://${window.location.host}/ws/${roomName}/${currentUser}`);
+        
+        ws.onmessage = function(event) {
+            const messages = document.getElementById('messages');
+            const rowDiv = document.createElement('div');
+            const msgBox = document.createElement('div');
+            
+            if(event.data.startsWith('**')) {
+                msgBox.className = 'system-msg';
+                msgBox.innerText = event.data;
+                rowDiv.style.width = "100%";
+                rowDiv.appendChild(msgBox);
+            } else {
+                const splitIndex = event.data.indexOf(':');
+                const sender = event.data.substring(0, splitIndex);
+                const text = event.data.substring(splitIndex + 1).trim();
+
+                rowDiv.className = 'message-row';
+                
+                if (sender === currentUser) {
+                    rowDiv.classList.add('my-message-row');
+                    msgBox.className = 'message-box my-message';
+                    msgBox.innerText = text; 
+                } else {
+                    rowDiv.classList.add('other-message-row');
+                    msgBox.className = 'message-box other-message';
+                    msgBox.innerHTML = `<span class='sender-name'>${sender}</span>${text}`;
+                }
+                rowDiv.appendChild(msgBox);
+            }
+            
+            messages.appendChild(rowDiv);
+            messages.scrollTop = messages.scrollHeight; 
+        };
+    }
+
+    function sendMessage(event) {
+        event.preventDefault();
+        const input = document.getElementById("messageText");
+        if (input.value.trim() !== "" && ws) {
+            ws.send(input.value);
+            input.value = '';
+        }
+    }
+
+    function leaveRoom() {
+        if(ws) { ws.close(); }
+        document.getElementById("chat-section").style.display = "none";
+        document.getElementById("dashboard-section").style.display = "block";
+    }
+</script>
+
+</body>
+</html>
