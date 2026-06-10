@@ -228,3 +228,32 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
         await manager.broadcast(f"** {username} left the chat **", room_name)
     finally:
         db.close()
+
+@app.get("/admin/live")
+def get_live_connections():
+    live_data = {}
+    total_live_users = 0
+    
+    # manager.active_rooms check karega ki kis room mein kitne WebSockets hain
+    for room_name, connections in manager.active_rooms.items():
+        count = len(connections)
+        live_data[room_name] = count
+        total_live_users += count
+        
+    return {
+        "total_live_users_right_now": total_live_users,
+        "rooms_data": live_data
+    }
+
+@app.get("/admin/db-stats")
+def get_db_stats(db: Session = Depends(get_db)):
+    # .count() directly table ke total rows gin leta hai
+    total_users = db.query(User).count()
+    total_rooms = db.query(Room).count()
+    total_messages = db.query(Message).count()
+    
+    return {
+        "total_registered_users": total_users,
+        "total_created_rooms": total_rooms,
+        "total_chat_messages": total_messages
+    }
