@@ -241,20 +241,18 @@
 
     // FIX: event parameter add kiya aur form submit rokne ka code lagaya
     function sendMessage(event) {
-        event.preventDefault(); // Page ko refresh hone se rokega
+        event.preventDefault(); // Page refresh rokne ke liye
 
-        // FIX: HTML ka sahi ID 'messageText' use kiya
         const inputField = document.getElementById("messageText");
         const messageText = inputField.value;
 
-        // FIX: Check kiya ki ws available hai ya nahi
+        // Agar message khali nahi hai aur connection zinda hai
         if (messageText.trim() !== "" && ws) {
-            const payload = {
-                text: messageText,
-                user_id: currentUser 
-            };
             
-            ws.send(JSON.stringify(payload)); 
+            // JSON hataya, direct text bheja
+            ws.send(messageText); 
+            
+            // Box clear kiya
             inputField.value = ""; 
         }
     }
