@@ -189,6 +189,7 @@
     }
 
     // --- SMART CHAT LOGIC ---
+// --- SMART CHAT LOGIC ---
     function enterChat(roomName) {
         document.getElementById("dashboard-section").style.display = "none";
         document.getElementById("chat-section").style.display = "block";
@@ -196,9 +197,13 @@
         document.getElementById("messages").innerHTML = ""; 
         
         const wsProtocol = window.location.protocol === "https:" ? "wss://" : "ws://";
-        const wsHost = window.location.host; // Yeh automatically render ka URL utha lega
-        const wsUrl = `${wsProtocol}${wsHost}/ws/room2/${currentUser}`; // Apne room aur user variables yahan set karein
-        const ws = new WebSocket(wsUrl);
+        const wsHost = window.location.host; 
+        
+        // FIX: Hardcoded 'room2' hata kar dynamic 'roomName' laga diya
+        const wsUrl = `${wsProtocol}${wsHost}/ws/${roomName}/${currentUser}`; 
+        
+        // FIX: 'const' hata diya taaki global 'ws' variable update ho sake
+        ws = new WebSocket(wsUrl);
         
         ws.onmessage = function(event) {
             const messages = document.getElementById('messages');
@@ -234,29 +239,25 @@
         };
     }
 
-    // function sendMessage(event) {
-    //     event.preventDefault();
-    //     const input = document.getElementById("messageText");
-    //     if (input.value.trim() !== "" && ws) {
-    //         ws.send(input.value);
-    //         input.value = '';
-    //     }
-    // }
+    // FIX: event parameter add kiya aur form submit rokne ka code lagaya
+    function sendMessage(event) {
+        event.preventDefault(); // Page ko refresh hone se rokega
 
- function sendMessage() {
-    const inputField = document.getElementById("messageInput");
-    const messageText = inputField.value;
+        // FIX: HTML ka sahi ID 'messageText' use kiya
+        const inputField = document.getElementById("messageText");
+        const messageText = inputField.value;
 
-    if (messageText.trim() !== "") {
-        const payload = {
-            text: messageText,
-            user_id: currentUser // Yahan static "rahul_12" hata kar dynamic variable laga diya
-        };
-        
-        ws.send(JSON.stringify(payload)); 
-        inputField.value = ""; 
+        // FIX: Check kiya ki ws available hai ya nahi
+        if (messageText.trim() !== "" && ws) {
+            const payload = {
+                text: messageText,
+                user_id: currentUser 
+            };
+            
+            ws.send(JSON.stringify(payload)); 
+            inputField.value = ""; 
+        }
     }
-}
 
     function leaveRoom() {
         if(ws) { ws.close(); }
