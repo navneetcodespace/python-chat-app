@@ -35,8 +35,9 @@
         .system-msg { color: #555; background: #fffde7; padding: 4px 10px; border-radius: 12px; font-style: italic; text-align: center; font-size: 0.8em; margin: 10px auto; width: fit-content; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
         .sender-name { font-size: 0.75em; font-weight: bold; color: #0084ff; margin-bottom: 3px; display: block; }
         
-        /* NAYA STYLING: Tick marks ke liye */
+        /* Tick marks */
         .msg-tick { font-size: 0.8em; color: #888; margin-left: 8px; display: inline-block; user-select: none; }
+        .tick-blue { color: #53bdeb; } /* Optional: Seen hone par isko blue kar sakte hain */
     </style>
 </head>
 <body>
@@ -94,96 +95,91 @@
     let currentUser = "";
     let ws = null;
 
-    // --- AUTHENTICATION ---
+    // --- AUTHENTICATION API ---
     async function signup() {
         const u = document.getElementById("username").value;
         const p = document.getElementById("password").value;
         try {
-            const res = await fetch("/signup", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username: u, password: p })
-            });
-            const data = await res.json();
-            if(res.ok) { alert(data.message); } else { document.getElementById("auth-error").innerText = data.detail; }
-        } catch (err) {
-            document.getElementById("auth-error").innerText = "Server not responding. Is backend running?";
-        }
+            const res = await fetch("/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
+            if(res.ok) { alert((await res.json()).message); } else { document.getElementById("auth-error").innerText = (await res.json()).detail; }
+        } catch (err) { document.getElementById("auth-error").innerText = "Server error."; }
     }
 
     async function login() {
         const u = document.getElementById("username").value;
         const p = document.getElementById("password").value;
         try {
-            const res = await fetch("/login", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username: u, password: p })
-            });
-            const data = await res.json();
+            const res = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
             if(res.ok) {
-                currentUser = data.username;
+                currentUser = (await res.json()).username;
                 document.getElementById("auth-section").style.display = "none";
                 document.getElementById("dashboard-section").style.display = "block";
                 document.getElementById("display-user").innerText = currentUser;
                 document.getElementById("password").value = ""; 
                 loadMyRooms();
-            } else {
-                document.getElementById("auth-error").innerText = data.detail;
-            }
-        } catch (err) {
-            document.getElementById("auth-error").innerText = "Server not responding. Is backend running?";
-        }
+            } else { document.getElementById("auth-error").innerText = (await res.json()).detail; }
+        } catch (err) { document.getElementById("auth-error").innerText = "Server error."; }
     }
 
     function logout() {
         currentUser = "";
         document.getElementById("dashboard-section").style.display = "none";
         document.getElementById("auth-section").style.display = "block";
-        document.getElementById("auth-error").innerText = "";
     }
 
-    // --- DASHBOARD LOGIC ---
+    // --- DASHBOARD API ---
     async function loadMyRooms() {
         const res = await fetch(`/rooms/${currentUser}`);
         const rooms = await res.json();
         const list = document.getElementById("room-list");
         list.innerHTML = "";
-        
-        if (rooms.length === 0) {
-            list.innerHTML = "<p style='color: gray; text-align: center;'>You haven't joined any rooms yet.</p>";
-            return;
-        }
+        if (rooms.length === 0) { list.innerHTML = "<p style='color: gray; text-align: center;'>You haven't joined any rooms yet.</p>"; return; }
         rooms.forEach(room => {
-            const btn = document.createElement("button");
-            btn.className = "room-btn";
-            btn.innerText = "📁 Enter: " + room.room_name;
-            btn.onclick = () => enterChat(room.room_name);
-            list.appendChild(btn);
+            const btn = document.createElement("button"); btn.className = "room-btn"; btn.innerText = "📁 Enter: " + room.room_name;
+            btn.onclick = () => enterChat(room.room_name); list.appendChild(btn);
         });
     }
 
     async function createRoom() {
-        const rName = document.getElementById("createRoomName").value;
-        const rKey = document.getElementById("createRoomKey").value;
+        const rName = document.getElementById("createRoomName").value; const rKey = document.getElementById("createRoomKey").value;
         if(!rName || !rKey) return alert("Please fill both fields");
-        const res = await fetch("/rooms/create", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser })
-        });
+        const res = await fetch("/rooms/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser }) });
         if(res.ok) { document.getElementById("createRoomName").value = ""; document.getElementById("createRoomKey").value = ""; loadMyRooms(); }
         else { alert((await res.json()).detail); }
     }
 
     async function joinRoomAPI() {
-        const rName = document.getElementById("joinRoomName").value;
-        const rKey = document.getElementById("joinRoomKey").value;
+        const rName = document.getElementById("joinRoomName").value; const rKey = document.getElementById("joinRoomKey").value;
         if(!rName || !rKey) return alert("Please fill both fields");
-        const res = await fetch("/rooms/join", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser })
-        });
+        const res = await fetch("/rooms/join", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser }) });
         if(res.ok) { document.getElementById("joinRoomName").value = ""; document.getElementById("joinRoomKey").value = ""; loadMyRooms(); }
         else { alert((await res.json()).detail); }
     }
+
+    // --- HELPER FUNCTION: Screen par message lagane ke liye ---
+    function appendMessageToUI(sender, text, isHistory = false) {
+        const messages = document.getElementById('messages');
+        const rowDiv = document.createElement('div');
+        const msgBox = document.createElement('div');
+
+        rowDiv.className = 'message-row';
+
+        if (sender === currentUser) {
+            rowDiv.classList.add('my-message-row');
+            msgBox.className = 'message-box my-message';
+            // Agar purana history message hai, toh usko pehle se hi 'Delivered ✓✓' maan lo
+            const tick = isHistory ? "✓✓" : "";
+            msgBox.innerHTML = `${text} <span class="msg-tick">${tick}</span>`; 
+        } else {
+            rowDiv.classList.add('other-message-row');
+            msgBox.className = 'message-box other-message';
+            msgBox.innerHTML = `<span class='sender-name'>${sender}</span>${text}`;
+        }
+        rowDiv.appendChild(msgBox);
+        messages.appendChild(rowDiv);
+        messages.scrollTop = messages.scrollHeight; 
+    }
+
 
     // --- SMART CHAT LOGIC ---
     function enterChat(roomName) {
@@ -193,92 +189,94 @@
         document.getElementById("messages").innerHTML = ""; 
         
         const wsProtocol = window.location.protocol === "https:" ? "wss://" : "ws://";
-        const wsHost = window.location.host;
-        const wsUrl = `${wsProtocol}${wsHost}/ws/${roomName}/${currentUser}`; 
+        const wsUrl = `${wsProtocol}${window.location.host}/ws/${roomName}/${currentUser}`; 
         ws = new WebSocket(wsUrl);
         
         ws.onmessage = function(event) {
-            const messages = document.getElementById('messages');
             
-            // NAYA LOGIC: JSON ACK Receipt handle karna
-            if (event.data.startsWith('{')) {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === "ack" && data.status === "sent") {
-                        const msgBox = document.getElementById(data.id);
-                        if (msgBox) {
-                            const tickElement = msgBox.querySelector('.msg-tick');
-                            if (tickElement) tickElement.innerText = "✓"; // Clock 🕒 se Single Tick ✓
-                        }
-                        return; // Isko message ki tarah print na karein
-                    }
-                } catch(e) {}
-            }
-
-            // NORMAL TEXT MESSAGES
-            const rowDiv = document.createElement('div');
-            const msgBox = document.createElement('div');
-            
+            // SYSTEM MESSAGES (User joined/left)
             if(event.data.startsWith('**')) {
+                const messages = document.getElementById('messages');
+                const rowDiv = document.createElement('div');
+                const msgBox = document.createElement('div');
                 msgBox.className = 'system-msg';
                 msgBox.innerText = event.data;
                 rowDiv.style.width = "100%";
                 rowDiv.appendChild(msgBox);
-            } else {
-                const splitIndex = event.data.indexOf(':');
-                if (splitIndex === -1) return;
+                messages.appendChild(rowDiv);
+                messages.scrollTop = messages.scrollHeight; 
+                return;
+            }
+
+            // JSON MESSAGES & STATUS UPDATES
+            if (event.data.startsWith('{')) {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    // 1. Single Tick Aaya (Sent)
+                    if (data.type === "ack" && data.status === "sent") {
+                        const msgBox = document.getElementById(data.id);
+                        if (msgBox) {
+                            const tickElement = msgBox.querySelector('.msg-tick');
+                            if (tickElement) tickElement.innerText = "✓"; 
+                        }
+                        return; 
+                    }
+                    
+                    // 2. Double Tick Aaya (Delivered)
+                    if (data.type === "status_update" && data.status === "delivered") {
+                        const msgBox = document.getElementById(data.id);
+                        if (msgBox) {
+                            const tickElement = msgBox.querySelector('.msg-tick');
+                            if (tickElement) tickElement.innerText = "✓✓"; 
+                        }
+                        return; 
+                    }
+
+                    // 3. Kisi dusre user ka naya message aaya
+                    if (data.type === "chat_message") {
+                        appendMessageToUI(data.user_id, data.text);
+
+                        // MAGIC: System chupchap sender ko delivery receipt bhej raha hai
+                        const deliveryAck = {
+                            type: "delivery_ack",
+                            message_id: data.id
+                        };
+                        ws.send(JSON.stringify(deliveryAck));
+                        return;
+                    }
+
+                } catch(e) {}
+            }
+
+            // HISTORY/FALLBACK: Purane plain text messages ke liye
+            const splitIndex = event.data.indexOf(':');
+            if (splitIndex !== -1) {
                 const sender = event.data.substring(0, splitIndex);
                 const text = event.data.substring(splitIndex + 1).trim();
-
-                rowDiv.className = 'message-row';
-                
-                if (sender === currentUser) {
-                    rowDiv.classList.add('my-message-row');
-                    msgBox.className = 'message-box my-message';
-                    msgBox.innerHTML = `${text} <span class="msg-tick">✓</span>`; // Past messages ke liye default tick
-                } else {
-                    rowDiv.classList.add('other-message-row');
-                    msgBox.className = 'message-box other-message';
-                    msgBox.innerHTML = `<span class='sender-name'>${sender}</span>${text}`;
-                }
-                rowDiv.appendChild(msgBox);
+                appendMessageToUI(sender, text, true); // true means yeh history hai
             }
-            
-            messages.appendChild(rowDiv);
-            messages.scrollTop = messages.scrollHeight; 
         };
     }
 
     function sendMessage(event) {
         event.preventDefault(); 
-
         const inputField = document.getElementById("messageText");
         const messageText = inputField.value;
 
         if (messageText.trim() !== "" && ws) {
-            
-            // 1. Unique ID generate karein
             const msgId = "msg_" + Date.now();
-
-            // 2. JSON Payload banayein
-            const payload = {
-                type: "chat_message",
-                id: msgId,
-                text: messageText,
-                user_id: currentUser 
-            };
-            
-            // 3. Data bhejein
+            const payload = { type: "chat_message", id: msgId, text: messageText, user_id: currentUser };
             ws.send(JSON.stringify(payload)); 
             
-            // 4. OPTIMISTIC UI: Turant screen par message dikhayein clock 🕒 ke sath
+            // OPTIMISTIC UI: Clock 🕒
             const messages = document.getElementById('messages');
             const rowDiv = document.createElement('div');
             rowDiv.className = 'message-row my-message-row';
             
             const msgBox = document.createElement('div');
             msgBox.className = 'message-box my-message';
-            msgBox.id = msgId; // Yeh ID ACK track karne ke kaam aayegi
+            msgBox.id = msgId; 
             msgBox.innerHTML = `${messageText} <span class="msg-tick">🕒</span>`;
             
             rowDiv.appendChild(msgBox);

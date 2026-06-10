@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from typing import Dict, List
 import bcrypt
 
-# Database models import karna
 from database import SessionLocal, User, Room, RoomMember, Message
 
 app = FastAPI(title="Secure Chat App Backend")
@@ -79,7 +78,7 @@ def create_room(room_data: RoomCreate, db: Session = Depends(get_db)):
 
     existing_room = db.query(Room).filter(Room.name == room_data.room_name).first()
     if existing_room:
-        raise HTTPException(status_code=400, detail="Room name already exists. Choose another.")
+        raise HTTPException(status_code=400, detail="Room name already exists.")
     
     new_room = Room(name=room_data.room_name, secret_key=room_data.secret_key)
     db.add(new_room)
@@ -100,7 +99,7 @@ def join_room(room_data: RoomJoin, db: Session = Depends(get_db)):
     if not room:
         raise HTTPException(status_code=404, detail="Room not found.")
     if room.secret_key != room_data.secret_key:
-        raise HTTPException(status_code=403, detail="Incorrect Room Password/Key.")
+        raise HTTPException(status_code=403, detail="Incorrect Room Password.")
         
     existing_member = db.query(RoomMember).filter(RoomMember.user_id == user.id, RoomMember.room_id == room.id).first()
     if not existing_member:
@@ -137,7 +136,6 @@ class ConnectionManager:
         if room_name in self.active_rooms and websocket in self.active_rooms[room_name]:
             self.active_rooms[room_name].remove(websocket)
 
-    # NAYA LOGIC: exclude_ws add kiya taaki sender ko dobara khudka message na dikhe
     async def broadcast(self, message: str, room_name: str, exclude_ws: WebSocket = None):
         if room_name in self.active_rooms:
             for connection in self.active_rooms[room_name]:
@@ -166,7 +164,7 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
 
     await manager.connect(websocket, room_name)
     
-    # Past messages load karna
+    # Past messages load karna (Plain text history)
     past_messages = db.query(Message).filter(Message.room_id == room.id).order_by(Message.timestamp).all()
     for msg in past_messages:
         sender = db.query(User).filter(User.id == msg.user_id).first()
@@ -179,9 +177,9 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
             raw_data = await websocket.receive_text()
             
             try:
-                # NAYA LOGIC: JSON Format ke liye
                 payload = json.loads(raw_data)
                 
+                # 1. NAYA MESSAGE AAYA HAI
                 if payload.get("type") == "chat_message":
                     msg_id = payload.get("id")
                     text_content = payload.get("text")
@@ -190,7 +188,7 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
                     db.add(new_msg)
                     db.commit()
                     
-                    # Sender ko turant ACK bhejo ki message server par aa gaya hai
+                    # Sender ko turant SENT ACK (✓) bhejo
                     ack_receipt = {
                         "type": "ack",
                         "id": msg_id,
@@ -198,11 +196,28 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
                     }
                     await websocket.send_text(json.dumps(ack_receipt))
                     
-                    # Baaki room walo ko text bhej do (Sender ko chhod kar)
-                    await manager.broadcast(f"{username}:{text_content}", room_name, exclude_ws=websocket)
+                    # NAYA LOGIC: Baaki room walo ko ab JSON format me message bhejo
+                    broadcast_data = {
+                        "type": "chat_message",
+                        "id": msg_id,
+                        "user_id": username,
+                        "text": text_content
+                    }
+                    await manager.broadcast(json.dumps(broadcast_data), room_name, exclude_ws=websocket)
+                
+                # 2. DELIVERY RECEIPT AAYI HAI SAMNE WALE SE
+                elif payload.get("type") == "delivery_ack":
+                    delivered_msg_id = payload.get("message_id")
+                    
+                    # Original sender ko DELIVERED STATUS (✓✓) update bhej do
+                    status_update = {
+                        "type": "status_update",
+                        "id": delivered_msg_id,
+                        "status": "delivered"
+                    }
+                    await manager.broadcast(json.dumps(status_update), room_name, exclude_ws=websocket)
                     
             except json.JSONDecodeError:
-                # Agar galti se plain text aa jaye toh purana logic chalega
                 new_msg = Message(text=raw_data, room_id=room.id, user_id=user.id)
                 db.add(new_msg)
                 db.commit()
