@@ -195,7 +195,10 @@
         document.getElementById("room-title").innerText = roomName;
         document.getElementById("messages").innerHTML = ""; 
         
-        ws = new WebSocket(`ws://${window.location.host}/ws/${roomName}/${currentUser}`);
+        const wsProtocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+        const wsHost = window.location.host; // Yeh automatically render ka URL utha lega
+        const wsUrl = `${wsProtocol}${wsHost}/ws/room2/rahul_12`; // Apne room aur user variables yahan set karein
+        const ws = new WebSocket(wsUrl);
         
         ws.onmessage = function(event) {
             const messages = document.getElementById('messages');
