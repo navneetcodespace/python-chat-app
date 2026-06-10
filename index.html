@@ -197,7 +197,7 @@
         
         const wsProtocol = window.location.protocol === "https:" ? "wss://" : "ws://";
         const wsHost = window.location.host; // Yeh automatically render ka URL utha lega
-        const wsUrl = `${wsProtocol}${wsHost}/ws/room2/rahul_12`; // Apne room aur user variables yahan set karein
+        const wsUrl = `${wsProtocol}${wsHost}/ws/room2/${currentUser}`; // Apne room aur user variables yahan set karein
         const ws = new WebSocket(wsUrl);
         
         ws.onmessage = function(event) {
@@ -234,14 +234,29 @@
         };
     }
 
-    function sendMessage(event) {
-        event.preventDefault();
-        const input = document.getElementById("messageText");
-        if (input.value.trim() !== "" && ws) {
-            ws.send(input.value);
-            input.value = '';
-        }
+    // function sendMessage(event) {
+    //     event.preventDefault();
+    //     const input = document.getElementById("messageText");
+    //     if (input.value.trim() !== "" && ws) {
+    //         ws.send(input.value);
+    //         input.value = '';
+    //     }
+    // }
+
+ function sendMessage() {
+    const inputField = document.getElementById("messageInput");
+    const messageText = inputField.value;
+
+    if (messageText.trim() !== "") {
+        const payload = {
+            text: messageText,
+            user_id: currentUser // Yahan static "rahul_12" hata kar dynamic variable laga diya
+        };
+        
+        ws.send(JSON.stringify(payload)); 
+        inputField.value = ""; 
     }
+}
 
     function leaveRoom() {
         if(ws) { ws.close(); }
