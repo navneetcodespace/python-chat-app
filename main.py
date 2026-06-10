@@ -1,3 +1,5 @@
+import os
+import json
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -5,7 +7,7 @@ from pydantic import BaseModel
 from typing import Dict, List
 import bcrypt
 
-# Database models import karna (Yahan RoomMember bhi add kiya hai)
+# Database models import karna
 from database import SessionLocal, User, Room, RoomMember, Message
 
 app = FastAPI(title="Secure Chat App Backend")
@@ -33,7 +35,7 @@ class UserAuth(BaseModel):
 class RoomCreate(BaseModel):
     room_name: str
     secret_key: str
-    username: str  # Pata karne ke liye ki kisne room banaya
+    username: str
 
 class RoomJoin(BaseModel):
     room_name: str
@@ -48,7 +50,6 @@ def get_frontend():
 # --- AUTH ROUTES ---
 @app.post("/signup")
 def signup(user: UserAuth, db: Session = Depends(get_db)):
-    # 1. Empty password check
     if not user.password or len(user.password.strip()) == 0:
         raise HTTPException(status_code=400, detail="Password cannot be empty.")
         
@@ -80,13 +81,11 @@ def create_room(room_data: RoomCreate, db: Session = Depends(get_db)):
     if existing_room:
         raise HTTPException(status_code=400, detail="Room name already exists. Choose another.")
     
-    # Room banayein with Secret Key
     new_room = Room(name=room_data.room_name, secret_key=room_data.secret_key)
     db.add(new_room)
     db.commit()
     db.refresh(new_room)
     
-    # Jisne room banaya hai usko automatically room ka member bana dein
     new_member = RoomMember(user_id=user.id, room_id=new_room.id)
     db.add(new_member)
     db.commit()
@@ -103,7 +102,6 @@ def join_room(room_data: RoomJoin, db: Session = Depends(get_db)):
     if room.secret_key != room_data.secret_key:
         raise HTTPException(status_code=403, detail="Incorrect Room Password/Key.")
         
-    # Check karein agar user pehle se member hai
     existing_member = db.query(RoomMember).filter(RoomMember.user_id == user.id, RoomMember.room_id == room.id).first()
     if not existing_member:
         new_member = RoomMember(user_id=user.id, room_id=room.id)
@@ -118,7 +116,6 @@ def get_user_rooms(username: str, db: Session = Depends(get_db)):
     if not user:
         return []
         
-    # Sirf wahi rooms fetch karein jiska user member hai
     memberships = db.query(RoomMember).filter(RoomMember.user_id == user.id).all()
     room_ids = [m.room_id for m in memberships]
     
@@ -140,10 +137,12 @@ class ConnectionManager:
         if room_name in self.active_rooms and websocket in self.active_rooms[room_name]:
             self.active_rooms[room_name].remove(websocket)
 
-    async def broadcast(self, message: str, room_name: str):
+    # NAYA LOGIC: exclude_ws add kiya taaki sender ko dobara khudka message na dikhe
+    async def broadcast(self, message: str, room_name: str, exclude_ws: WebSocket = None):
         if room_name in self.active_rooms:
             for connection in self.active_rooms[room_name]:
-                await connection.send_text(message)
+                if connection != exclude_ws:
+                    await connection.send_text(message)
 
 manager = ConnectionManager()
 
@@ -159,7 +158,6 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
         db.close()
         return
         
-    # SECURITY CHECK: WebSocket connect hone se pehle check karein ki kya user is room ka member hai?
     is_member = db.query(RoomMember).filter(RoomMember.user_id == user.id, RoomMember.room_id == room.id).first()
     if not is_member:
         await websocket.close()
@@ -168,28 +166,50 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
 
     await manager.connect(websocket, room_name)
     
+    # Past messages load karna
     past_messages = db.query(Message).filter(Message.room_id == room.id).order_by(Message.timestamp).all()
     for msg in past_messages:
         sender = db.query(User).filter(User.id == msg.user_id).first()
         sender_name = sender.username if sender else "Unknown"
-        await websocket.send_text(f"{sender_name}: {msg.text}")
+        await websocket.send_text(f"{sender_name}:{msg.text}")
 
     try:
-        await manager.broadcast(f"** {username} joined the chat **", room_name)
+        await manager.broadcast(f"** {username} joined the chat **", room_name, exclude_ws=websocket)
         while True:
-            data = await websocket.receive_text()
-            new_msg = Message(text=data, room_id=room.id, user_id=user.id)
-            db.add(new_msg)
-            db.commit()
-            await manager.broadcast(f"{username}: {data}", room_name)
+            raw_data = await websocket.receive_text()
+            
+            try:
+                # NAYA LOGIC: JSON Format ke liye
+                payload = json.loads(raw_data)
+                
+                if payload.get("type") == "chat_message":
+                    msg_id = payload.get("id")
+                    text_content = payload.get("text")
+                    
+                    new_msg = Message(text=text_content, room_id=room.id, user_id=user.id)
+                    db.add(new_msg)
+                    db.commit()
+                    
+                    # Sender ko turant ACK bhejo ki message server par aa gaya hai
+                    ack_receipt = {
+                        "type": "ack",
+                        "id": msg_id,
+                        "status": "sent"
+                    }
+                    await websocket.send_text(json.dumps(ack_receipt))
+                    
+                    # Baaki room walo ko text bhej do (Sender ko chhod kar)
+                    await manager.broadcast(f"{username}:{text_content}", room_name, exclude_ws=websocket)
+                    
+            except json.JSONDecodeError:
+                # Agar galti se plain text aa jaye toh purana logic chalega
+                new_msg = Message(text=raw_data, room_id=room.id, user_id=user.id)
+                db.add(new_msg)
+                db.commit()
+                await manager.broadcast(f"{username}:{raw_data}", room_name, exclude_ws=websocket)
             
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_name)
         await manager.broadcast(f"** {username} left the chat **", room_name)
     finally:
         db.close()
-
-# --- FRONTEND ROUTE ---
-@app.get("/")
-def get_frontend():
-    return FileResponse("index.html")

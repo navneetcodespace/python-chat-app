@@ -34,20 +34,18 @@
         
         .system-msg { color: #555; background: #fffde7; padding: 4px 10px; border-radius: 12px; font-style: italic; text-align: center; font-size: 0.8em; margin: 10px auto; width: fit-content; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
         .sender-name { font-size: 0.75em; font-weight: bold; color: #0084ff; margin-bottom: 3px; display: block; }
+        
+        /* NAYA STYLING: Tick marks ke liye */
+        .msg-tick { font-size: 0.8em; color: #888; margin-left: 8px; display: inline-block; user-select: none; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    
     <div id="auth-section">
         <h2>Secure Login / Signup</h2>
-        <div class="input-group">
-            <input type="text" id="username" placeholder="Enter Username (e.g. rahul_123)">
-        </div>
-        <div class="input-group">
-            <input type="password" id="password" placeholder="Enter Password">
-        </div>
+        <div class="input-group"><input type="text" id="username" placeholder="Enter Username (e.g. rahul_123)"></div>
+        <div class="input-group"><input type="password" id="password" placeholder="Enter Password"></div>
         <button onclick="login()">Login</button>
         <button onclick="signup()" style="background-color: #4CAF50;">Sign Up</button>
         <p id="auth-error" style="color: red; text-align: center;"></p>
@@ -90,7 +88,6 @@
             <button style="width: 20%;">Send</button>
         </form>
     </div>
-
 </div>
 
 <script>
@@ -189,7 +186,6 @@
     }
 
     // --- SMART CHAT LOGIC ---
-// --- SMART CHAT LOGIC ---
     function enterChat(roomName) {
         document.getElementById("dashboard-section").style.display = "none";
         document.getElementById("chat-section").style.display = "block";
@@ -197,16 +193,29 @@
         document.getElementById("messages").innerHTML = ""; 
         
         const wsProtocol = window.location.protocol === "https:" ? "wss://" : "ws://";
-        const wsHost = window.location.host; 
-        
-        // FIX: Hardcoded 'room2' hata kar dynamic 'roomName' laga diya
+        const wsHost = window.location.host;
         const wsUrl = `${wsProtocol}${wsHost}/ws/${roomName}/${currentUser}`; 
-        
-        // FIX: 'const' hata diya taaki global 'ws' variable update ho sake
         ws = new WebSocket(wsUrl);
         
         ws.onmessage = function(event) {
             const messages = document.getElementById('messages');
+            
+            // NAYA LOGIC: JSON ACK Receipt handle karna
+            if (event.data.startsWith('{')) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === "ack" && data.status === "sent") {
+                        const msgBox = document.getElementById(data.id);
+                        if (msgBox) {
+                            const tickElement = msgBox.querySelector('.msg-tick');
+                            if (tickElement) tickElement.innerText = "✓"; // Clock 🕒 se Single Tick ✓
+                        }
+                        return; // Isko message ki tarah print na karein
+                    }
+                } catch(e) {}
+            }
+
+            // NORMAL TEXT MESSAGES
             const rowDiv = document.createElement('div');
             const msgBox = document.createElement('div');
             
@@ -217,6 +226,7 @@
                 rowDiv.appendChild(msgBox);
             } else {
                 const splitIndex = event.data.indexOf(':');
+                if (splitIndex === -1) return;
                 const sender = event.data.substring(0, splitIndex);
                 const text = event.data.substring(splitIndex + 1).trim();
 
@@ -225,7 +235,7 @@
                 if (sender === currentUser) {
                     rowDiv.classList.add('my-message-row');
                     msgBox.className = 'message-box my-message';
-                    msgBox.innerText = text; 
+                    msgBox.innerHTML = `${text} <span class="msg-tick">✓</span>`; // Past messages ke liye default tick
                 } else {
                     rowDiv.classList.add('other-message-row');
                     msgBox.className = 'message-box other-message';
@@ -239,20 +249,42 @@
         };
     }
 
-    // FIX: event parameter add kiya aur form submit rokne ka code lagaya
     function sendMessage(event) {
-        event.preventDefault(); // Page refresh rokne ke liye
+        event.preventDefault(); 
 
         const inputField = document.getElementById("messageText");
         const messageText = inputField.value;
 
-        // Agar message khali nahi hai aur connection zinda hai
         if (messageText.trim() !== "" && ws) {
             
-            // JSON hataya, direct text bheja
-            ws.send(messageText); 
+            // 1. Unique ID generate karein
+            const msgId = "msg_" + Date.now();
+
+            // 2. JSON Payload banayein
+            const payload = {
+                type: "chat_message",
+                id: msgId,
+                text: messageText,
+                user_id: currentUser 
+            };
             
-            // Box clear kiya
+            // 3. Data bhejein
+            ws.send(JSON.stringify(payload)); 
+            
+            // 4. OPTIMISTIC UI: Turant screen par message dikhayein clock 🕒 ke sath
+            const messages = document.getElementById('messages');
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'message-row my-message-row';
+            
+            const msgBox = document.createElement('div');
+            msgBox.className = 'message-box my-message';
+            msgBox.id = msgId; // Yeh ID ACK track karne ke kaam aayegi
+            msgBox.innerHTML = `${messageText} <span class="msg-tick">🕒</span>`;
+            
+            rowDiv.appendChild(msgBox);
+            messages.appendChild(rowDiv);
+            messages.scrollTop = messages.scrollHeight;
+            
             inputField.value = ""; 
         }
     }
