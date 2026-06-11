@@ -15,6 +15,11 @@
         
         #dashboard-section, #chat-section { display: none; }
         
+        .room-actions { background: #f9f9f9; padding: 15px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #eee; }
+        .room-actions h4 { margin-top: 0; margin-bottom: 10px; color: #555; }
+        .room-btn { background-color: #e4e6eb; color: black; margin-bottom: 5px; text-align: left; font-weight: bold;}
+        .room-btn:hover { background-color: #d8dadf; }
+        
         /* --- CHAT UI STYLING --- */
         #messages { height: 300px; border: 1px solid #ddd; border-radius: 8px; overflow-y: scroll; padding: 15px; margin-bottom: 10px; background-color: #e5ddd5; display: flex; flex-direction: column; }
         .message-row { display: flex; width: 100%; margin-bottom: 10px; }
@@ -26,9 +31,18 @@
         .msg-tick { font-size: 0.8em; color: #888; margin-left: 8px; display: inline-block; user-select: none; }
         .sender-name { font-size: 0.75em; font-weight: bold; color: #0084ff; margin-bottom: 3px; display: block; }
         
-        /* --- WEBRTC VIDEO UI --- */
-        #video-container { display: none; gap: 10px; justify-content: space-between; margin-bottom: 10px; background: #000; padding: 10px; border-radius: 8px;}
+        /* --- NAYA WEBRTC VIDEO UI (CONTROLS KE SATH) --- */
+        #video-wrapper { display: none; flex-direction: column; background: #000; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
+        #video-container { display: flex; gap: 10px; justify-content: space-between; }
         video { width: 48%; border-radius: 8px; background: #222; aspect-ratio: 4/3; object-fit: cover;}
+        
+        #localVideo { transform: scaleX(-1); } /* Mirror effect */
+        
+        .controls { display: flex; justify-content: center; gap: 15px; margin-top: 15px; }
+        .ctrl-btn { width: 50px; height: 50px; border-radius: 50%; font-size: 1.2em; display: flex; align-items: center; justify-content: center; background-color: #444; border: none; cursor: pointer; transition: 0.3s;}
+        .ctrl-btn:hover { background-color: #666; }
+        .btn-red { background-color: #f44336 !important; }
+        .btn-red:hover { background-color: #d32f2f !important; }
     </style>
 </head>
 <body>
@@ -44,11 +58,27 @@
     </div>
 
     <div id="dashboard-section">
-        <h2>Dashboard</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2>Dashboard</h2>
+            <button onclick="logout()" style="width: auto; background-color: #f44336; padding: 5px 10px;">Logout</button>
+        </div>
         <p style="text-align: center;">Welcome, <b id="display-user"></b>!</p>
-        <div class="input-group"><input type="text" id="joinRoomName" placeholder="Room Name"></div>
-        <div class="input-group"><input type="password" id="joinRoomKey" placeholder="Secret Key"></div>
-        <button onclick="joinRoomAPI()">Join Room</button>
+        
+        <div class="room-actions">
+            <h4>Create a New Room</h4>
+            <div class="input-group"><input type="text" id="createRoomName" placeholder="Room Name"></div>
+            <div class="input-group"><input type="password" id="createRoomKey" placeholder="Set a Secret Key"></div>
+            <button onclick="createRoom()" style="background-color: #ff9800;">Create Room</button>
+        </div>
+
+        <div class="room-actions">
+            <h4>Join an Existing Room</h4>
+            <div class="input-group"><input type="text" id="joinRoomName" placeholder="Room Name"></div>
+            <div class="input-group"><input type="password" id="joinRoomKey" placeholder="Secret Key"></div>
+            <button onclick="joinRoomAPI()" style="background-color: #2196F3;">Join Room</button>
+        </div>
+        
+        <h3>My Active Rooms</h3>
         <div id="room-list"></div>
     </div>
 
@@ -61,9 +91,16 @@
             </div>
         </div>
 
-        <div id="video-container">
-            <video id="localVideo" autoplay muted playsinline></video>
-            <video id="remoteVideo" autoplay playsinline></video>
+        <div id="video-wrapper">
+            <div id="video-container">
+                <video id="localVideo" autoplay muted playsinline></video>
+                <video id="remoteVideo" autoplay playsinline></video>
+            </div>
+            <div class="controls">
+                <button id="micBtn" class="ctrl-btn" onclick="toggleMic()">🎤</button>
+                <button id="camBtn" class="ctrl-btn" onclick="toggleCam()">📷</button>
+                <button class="ctrl-btn btn-red" onclick="hangupCall()">❌</button>
+            </div>
         </div>
         
         <div id="messages"></div>
@@ -82,80 +119,118 @@
     // --- NATIVE WEBRTC LOGIC ---
     let localStream;
     let peerConnection;
-    // Free Google STUN Servers to bypass firewalls
+    let isMicOn = true;
+    let isCamOn = true;
+    let iceCandidateQueue = [];
+
     const rtcConfig = { 'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}, {'urls': 'stun:stun1.l.google.com:19302'}] };
 
-    // Step 1: Initialize PeerConnection and Camera
     async function initWebRTC() {
         if (!peerConnection) {
             peerConnection = new RTCPeerConnection(rtcConfig);
             
-            // Jab samne wale ka video aaye, toh remoteVideo tag me daal do
             peerConnection.ontrack = event => {
                 document.getElementById('remoteVideo').srcObject = event.streams[0];
             };
 
-            // Jab P2P path mile, toh WebSocket se doosre user ko bhejo
             peerConnection.onicecandidate = event => {
                 if (event.candidate) {
                     ws.send(JSON.stringify({ type: 'webrtc_ice_candidate', candidate: event.candidate, user_id: currentUser }));
                 }
             };
 
-            // Camera aur Mic ki permission lo
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 document.getElementById('localVideo').srcObject = localStream;
                 localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+                
+                isMicOn = true; isCamOn = true;
+                document.getElementById('micBtn').innerText = "🎤"; document.getElementById('micBtn').classList.remove('btn-red');
+                document.getElementById('camBtn').innerText = "📷"; document.getElementById('camBtn').classList.remove('btn-red');
             } catch(e) {
-                alert("Camera ya Mic ka access deny ho gaya hai!");
+                alert("Please allow Camera & Microphone access!");
                 console.error(e);
             }
         }
     }
 
-    // Step 2: "Call" button dabane par Offer banana
     async function startCall() {
-        document.getElementById('video-container').style.display = 'flex';
+        document.getElementById('video-wrapper').style.display = 'flex';
         await initWebRTC();
         
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
         
-        // WebSocket se doosre user ko 'Offer' bhej do
         ws.send(JSON.stringify({ type: 'webrtc_offer', offer: offer, user_id: currentUser }));
+        appendMessageToUI("System", "** Calling... **", true);
     }
 
-    // --- HELPER FUNCTION: Chat UI ---
+    function toggleMic() {
+        if (localStream) {
+            isMicOn = !isMicOn;
+            localStream.getAudioTracks()[0].enabled = isMicOn;
+            const btn = document.getElementById('micBtn');
+            btn.innerText = isMicOn ? "🎤" : "🔇";
+            if(isMicOn) btn.classList.remove('btn-red'); else btn.classList.add('btn-red');
+        }
+    }
+
+    function toggleCam() {
+        if (localStream) {
+            isCamOn = !isCamOn;
+            localStream.getVideoTracks()[0].enabled = isCamOn;
+            const btn = document.getElementById('camBtn');
+            btn.innerText = isCamOn ? "📷" : "🚫";
+            if(isCamOn) btn.classList.remove('btn-red'); else btn.classList.add('btn-red');
+        }
+    }
+
+    function hangupCall() {
+        if(ws) ws.send(JSON.stringify({ type: 'webrtc_hangup', user_id: currentUser }));
+        closeVideoUI();
+        appendMessageToUI("System", "** You ended the call **", true);
+    }
+
+    function closeVideoUI() {
+        if(localStream) localStream.getTracks().forEach(track => track.stop());
+        if(peerConnection) { peerConnection.close(); peerConnection = null; }
+        iceCandidateQueue = [];
+        document.getElementById('video-wrapper').style.display = 'none';
+        document.getElementById('remoteVideo').srcObject = null;
+    }
+
     function appendMessageToUI(sender, text, isHistory = false) {
         const messages = document.getElementById('messages');
         const rowDiv = document.createElement('div');
-        const msgBox = document.createElement('div');
-        rowDiv.className = 'message-row';
-
-        if (sender === currentUser) {
-            rowDiv.classList.add('my-message-row');
-            msgBox.className = 'message-box my-message';
-            const tick = isHistory ? "✓✓" : "";
-            msgBox.innerHTML = `${text} <span class="msg-tick">${tick}</span>`; 
+        
+        if (sender === "System") {
+            const msgBox = document.createElement('div');
+            msgBox.className = 'system-msg'; msgBox.innerText = text;
+            rowDiv.style.width = "100%"; rowDiv.appendChild(msgBox);
         } else {
-            rowDiv.classList.add('other-message-row');
-            msgBox.className = 'message-box other-message';
-            msgBox.innerHTML = `<span class='sender-name'>${sender}</span>${text}`;
+            const msgBox = document.createElement('div');
+            rowDiv.className = 'message-row';
+            if (sender === currentUser) {
+                rowDiv.classList.add('my-message-row');
+                msgBox.className = 'message-box my-message';
+                const tick = isHistory ? "✓✓" : "";
+                msgBox.innerHTML = `${text} <span class="msg-tick">${tick}</span>`; 
+            } else {
+                rowDiv.classList.add('other-message-row');
+                msgBox.className = 'message-box other-message';
+                msgBox.innerHTML = `<span class='sender-name'>${sender}</span>${text}`;
+            }
+            rowDiv.appendChild(msgBox);
         }
-        rowDiv.appendChild(msgBox);
         messages.appendChild(rowDiv);
         messages.scrollTop = messages.scrollHeight; 
     }
 
-    // --- AUTHENTICATION API ---
     async function signup() {
-        // ... (Aapka purana signup code same rahega) ...
         const u = document.getElementById("username").value; const p = document.getElementById("password").value;
         const res = await fetch("/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
-        if(res.ok) alert((await res.json()).message); else alert("Error signing up.");
+        if(res.ok) alert((await res.json()).message); else alert((await res.json()).detail || "Error signing up.");
     }
-
     async function login() {
         const u = document.getElementById("username").value; const p = document.getElementById("password").value;
         const res = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
@@ -164,30 +239,34 @@
             document.getElementById("auth-section").style.display = "none";
             document.getElementById("dashboard-section").style.display = "block";
             document.getElementById("display-user").innerText = currentUser;
-            loadMyRooms();
-        } else alert("Invalid Credentials");
+            document.getElementById("password").value = ""; loadMyRooms();
+        } else alert((await res.json()).detail || "Invalid Credentials");
     }
-
     function logout() { location.reload(); }
-
     async function loadMyRooms() {
         const res = await fetch(`/rooms/${currentUser}`);
         const rooms = await res.json();
-        const list = document.getElementById("room-list");
-        list.innerHTML = "";
+        const list = document.getElementById("room-list"); list.innerHTML = "";
         rooms.forEach(room => {
-            const btn = document.createElement("button"); btn.innerText = "📁 Enter: " + room.room_name;
+            const btn = document.createElement("button"); btn.className = "room-btn"; btn.innerText = "📁 Enter: " + room.room_name;
             btn.onclick = () => enterChat(room.room_name); list.appendChild(btn);
         });
     }
-
+    async function createRoom() {
+        const rName = document.getElementById("createRoomName").value; const rKey = document.getElementById("createRoomKey").value;
+        if(!rName || !rKey) return alert("Please fill both fields");
+        const res = await fetch("/rooms/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser }) });
+        if(res.ok) { document.getElementById("createRoomName").value = ""; document.getElementById("createRoomKey").value = ""; loadMyRooms(); }
+        else { alert((await res.json()).detail); }
+    }
     async function joinRoomAPI() {
         const rName = document.getElementById("joinRoomName").value; const rKey = document.getElementById("joinRoomKey").value;
+        if(!rName || !rKey) return alert("Please fill both fields");
         const res = await fetch("/rooms/join", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser }) });
-        if(res.ok) loadMyRooms(); else alert("Error joining room.");
+        if(res.ok) { document.getElementById("joinRoomName").value = ""; document.getElementById("joinRoomKey").value = ""; loadMyRooms(); }
+        else { alert((await res.json()).detail); }
     }
 
-    // --- SMART CHAT & SIGNALING LOGIC ---
     function enterChat(roomName) {
         currentRoomName = roomName;
         document.getElementById("dashboard-section").style.display = "none";
@@ -199,32 +278,38 @@
         ws = new WebSocket(`${wsProtocol}${window.location.host}/ws/${roomName}/${currentUser}`);
         
         ws.onmessage = async function(event) {
-            // JSON MESSAGES (Signaling & Status)
             if (event.data.startsWith('{')) {
                 try {
                     const data = JSON.parse(event.data);
                     
-                    // --- WEBRTC SIGNALING HANDLERS ---
                     if (data.type === 'webrtc_offer' && data.user_id !== currentUser) {
-                        document.getElementById('video-container').style.display = 'flex';
+                        document.getElementById('video-wrapper').style.display = 'flex';
                         await initWebRTC();
                         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
                         const answer = await peerConnection.createAnswer();
                         await peerConnection.setLocalDescription(answer);
                         ws.send(JSON.stringify({ type: 'webrtc_answer', answer: answer, user_id: currentUser }));
+                        
+                        iceCandidateQueue.forEach(c => peerConnection.addIceCandidate(c));
+                        iceCandidateQueue = [];
                     }
-                    
                     else if (data.type === 'webrtc_answer' && data.user_id !== currentUser) {
                         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                        iceCandidateQueue.forEach(c => peerConnection.addIceCandidate(c));
+                        iceCandidateQueue = [];
                     }
-                    
                     else if (data.type === 'webrtc_ice_candidate' && data.user_id !== currentUser) {
-                        if (peerConnection) {
-                            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        const candidate = new RTCIceCandidate(data.candidate);
+                        if (peerConnection && peerConnection.remoteDescription) {
+                            await peerConnection.addIceCandidate(candidate);
+                        } else {
+                            iceCandidateQueue.push(candidate);
                         }
                     }
-
-                    // --- CHAT MESSAGE HANDLERS ---
+                    else if (data.type === 'webrtc_hangup' && data.user_id !== currentUser) {
+                        closeVideoUI();
+                        appendMessageToUI("System", "** The other person ended the call **", true);
+                    }
                     else if (data.type === "ack" && data.status === "sent") {
                         const msgBox = document.getElementById(data.id);
                         if (msgBox) msgBox.querySelector('.msg-tick').innerText = "✓"; 
@@ -239,9 +324,8 @@
                     }
                 } catch(e) {}
             } else if (event.data.startsWith('**')) {
-                // System Messages
+                appendMessageToUI("System", event.data, true);
             } else {
-                // History text
                 const splitIndex = event.data.indexOf(':');
                 if (splitIndex !== -1) appendMessageToUI(event.data.substring(0, splitIndex), event.data.substring(splitIndex + 1).trim(), true);
             }
@@ -268,10 +352,7 @@
 
     function leaveRoom() {
         if(ws) ws.close();
-        if(localStream) localStream.getTracks().forEach(track => track.stop()); // Camera band karna
-        if(peerConnection) peerConnection.close();
-        peerConnection = null;
-        document.getElementById('video-container').style.display = 'none';
+        closeVideoUI();
         document.getElementById("chat-section").style.display = "none";
         document.getElementById("dashboard-section").style.display = "block";
     }

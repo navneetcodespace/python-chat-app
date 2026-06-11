@@ -205,16 +205,13 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
                     msg_id = payload.get("id")
                     text_content = payload.get("text")
                     
-                    # Save to DB
                     new_msg = Message(text=text_content, room_id=room.id, user_id=user.id)
                     db.add(new_msg)
                     db.commit()
                     
-                    # Send Sent ACK (Single Tick)
                     ack_receipt = {"type": "ack", "id": msg_id, "status": "sent"}
                     await websocket.send_text(json.dumps(ack_receipt))
                     
-                    # Broadcast to room
                     broadcast_data = {"type": "chat_message", "id": msg_id, "user_id": username, "text": text_content}
                     await manager.broadcast(json.dumps(broadcast_data), room_name, exclude_ws=websocket)
                 
@@ -224,13 +221,11 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
                     status_update = {"type": "status_update", "id": delivered_msg_id, "status": "delivered"}
                     await manager.broadcast(json.dumps(status_update), room_name, exclude_ws=websocket)
                     
-                # 3. WEBRTC SIGNALING (Do Not Save to Database)
-                elif msg_type in ["webrtc_offer", "webrtc_answer", "webrtc_ice_candidate"]:
-                    # Just pass the signaling message to the other user in the room
+                # 3. WEBRTC SIGNALING (Video Call Logic)
+                elif msg_type in ["webrtc_offer", "webrtc_answer", "webrtc_ice_candidate", "webrtc_hangup"]:
                     await manager.broadcast(json.dumps(payload), room_name, exclude_ws=websocket)
                     
             except json.JSONDecodeError:
-                # Fallback for plain text
                 new_msg = Message(text=raw_data, room_id=room.id, user_id=user.id)
                 db.add(new_msg)
                 db.commit()
