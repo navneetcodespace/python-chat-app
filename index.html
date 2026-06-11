@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secure Chat App</title>
+    <title>Secure Chat & Video App</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
         .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); width: 100%; max-width: 600px; }
@@ -22,25 +22,24 @@
 
         /* --- CHAT UI STYLING --- */
         #messages { height: 400px; border: 1px solid #ddd; border-radius: 8px; overflow-y: scroll; padding: 15px; margin-bottom: 10px; background-color: #e5ddd5; display: flex; flex-direction: column; }
-        
         .message-row { display: flex; width: 100%; margin-bottom: 10px; }
         .message-box { max-width: 70%; padding: 8px 12px; border-radius: 8px; font-size: 0.95em; line-height: 1.4; word-wrap: break-word;}
-        
         .other-message { background-color: white; border-top-left-radius: 0; align-self: flex-start; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
         .other-message-row { justify-content: flex-start; }
-        
         .my-message { background-color: #dcf8c6; border-top-right-radius: 0; align-self: flex-end; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
         .my-message-row { justify-content: flex-end; }
-        
         .system-msg { color: #555; background: #fffde7; padding: 4px 10px; border-radius: 12px; font-style: italic; text-align: center; font-size: 0.8em; margin: 10px auto; width: fit-content; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
         .sender-name { font-size: 0.75em; font-weight: bold; color: #0084ff; margin-bottom: 3px; display: block; }
-        
-        /* Tick marks */
         .msg-tick { font-size: 0.8em; color: #888; margin-left: 8px; display: inline-block; user-select: none; }
-        .tick-blue { color: #53bdeb; } /* Optional: Seen hone par isko blue kar sakte hain */
+        
+        /* Zego Video Container overlay */
+        #zego-video-container { display: none; width: 100vw; height: 100vh; position: fixed; top: 0; left: 0; z-index: 9999; background: #333; }
     </style>
+    <script src="https://unpkg.com/@zegocloud/zego-uikit-prebuilt/zego-uikit-prebuilt.js"></script>
 </head>
 <body>
+
+<div id="zego-video-container"></div>
 
 <div class="container">
     <div id="auth-section">
@@ -80,7 +79,10 @@
     <div id="chat-section">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <h2 id="room-title" style="margin: 0;">Room Name</h2>
-            <button onclick="leaveRoom()" style="width: auto; background-color: #f44336; padding: 8px 12px;">Back</button>
+            <div>
+                <button onclick="startVideoCall()" style="background-color: #4CAF50; width: auto; padding: 8px 12px; margin-right: 5px;">🎥 Call</button>
+                <button onclick="leaveRoom()" style="width: auto; background-color: #f44336; padding: 8px 12px;">Back</button>
+            </div>
         </div>
         
         <div id="messages"></div>
@@ -94,6 +96,41 @@
 <script>
     let currentUser = "";
     let ws = null;
+    let currentRoomName = ""; // Room name store karne ke liye
+
+    // --- VIDEO CALL LOGIC ---
+    function startVideoCall() {
+        // Yahan apni Zego details daaliye
+        const appID = 404470069; // e.g. 404470069 (Bina quotes ke likhein)
+        const serverSecret = "41c9f266cebd96dbdb2f1b187f1e7147"; // Quotes ke andar likhein
+        
+        const roomID = currentRoomName; // Chat wale room ko hi video room bana lenge
+        const userID = currentUser + "_" + Math.floor(Math.random() * 1000); // Unique Zego ID
+        const userName = currentUser;
+
+        // Generate Token for Call
+        const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(appID, serverSecret, roomID, userID, userName);
+        
+        // Zego Instance Banayein
+        const zp = ZegoUIKitPrebuilt.create(kitToken);
+        
+        // Call UI ko screen par display karein
+        const container = document.getElementById('zego-video-container');
+        container.style.display = "block";
+
+        zp.joinRoom({
+            container: container,
+            scenario: {
+                mode: ZegoUIKitPrebuilt.GroupCall, // Multiple log bhi add ho sakte hain
+            },
+            showPreJoinView: true,
+            onLeaveRoom: () => {
+                // Call katne par UI wapas chhupa dein
+                container.style.display = "none";
+            }
+        });
+    }
+
 
     // --- AUTHENTICATION API ---
     async function signup() {
@@ -156,18 +193,15 @@
         else { alert((await res.json()).detail); }
     }
 
-    // --- HELPER FUNCTION: Screen par message lagane ke liye ---
     function appendMessageToUI(sender, text, isHistory = false) {
         const messages = document.getElementById('messages');
         const rowDiv = document.createElement('div');
         const msgBox = document.createElement('div');
-
         rowDiv.className = 'message-row';
 
         if (sender === currentUser) {
             rowDiv.classList.add('my-message-row');
             msgBox.className = 'message-box my-message';
-            // Agar purana history message hai, toh usko pehle se hi 'Delivered ✓✓' maan lo
             const tick = isHistory ? "✓✓" : "";
             msgBox.innerHTML = `${text} <span class="msg-tick">${tick}</span>`; 
         } else {
@@ -180,9 +214,9 @@
         messages.scrollTop = messages.scrollHeight; 
     }
 
-
     // --- SMART CHAT LOGIC ---
     function enterChat(roomName) {
+        currentRoomName = roomName; // Save for video call
         document.getElementById("dashboard-section").style.display = "none";
         document.getElementById("chat-section").style.display = "block";
         document.getElementById("room-title").innerText = roomName;
@@ -193,8 +227,6 @@
         ws = new WebSocket(wsUrl);
         
         ws.onmessage = function(event) {
-            
-            // SYSTEM MESSAGES (User joined/left)
             if(event.data.startsWith('**')) {
                 const messages = document.getElementById('messages');
                 const rowDiv = document.createElement('div');
@@ -208,12 +240,9 @@
                 return;
             }
 
-            // JSON MESSAGES & STATUS UPDATES
             if (event.data.startsWith('{')) {
                 try {
                     const data = JSON.parse(event.data);
-                    
-                    // 1. Single Tick Aaya (Sent)
                     if (data.type === "ack" && data.status === "sent") {
                         const msgBox = document.getElementById(data.id);
                         if (msgBox) {
@@ -222,8 +251,6 @@
                         }
                         return; 
                     }
-                    
-                    // 2. Double Tick Aaya (Delivered)
                     if (data.type === "status_update" && data.status === "delivered") {
                         const msgBox = document.getElementById(data.id);
                         if (msgBox) {
@@ -232,29 +259,20 @@
                         }
                         return; 
                     }
-
-                    // 3. Kisi dusre user ka naya message aaya
                     if (data.type === "chat_message") {
                         appendMessageToUI(data.user_id, data.text);
-
-                        // MAGIC: System chupchap sender ko delivery receipt bhej raha hai
-                        const deliveryAck = {
-                            type: "delivery_ack",
-                            message_id: data.id
-                        };
+                        const deliveryAck = { type: "delivery_ack", message_id: data.id };
                         ws.send(JSON.stringify(deliveryAck));
                         return;
                     }
-
                 } catch(e) {}
             }
 
-            // HISTORY/FALLBACK: Purane plain text messages ke liye
             const splitIndex = event.data.indexOf(':');
             if (splitIndex !== -1) {
                 const sender = event.data.substring(0, splitIndex);
                 const text = event.data.substring(splitIndex + 1).trim();
-                appendMessageToUI(sender, text, true); // true means yeh history hai
+                appendMessageToUI(sender, text, true); 
             }
         };
     }
@@ -269,11 +287,9 @@
             const payload = { type: "chat_message", id: msgId, text: messageText, user_id: currentUser };
             ws.send(JSON.stringify(payload)); 
             
-            // OPTIMISTIC UI: Clock 🕒
             const messages = document.getElementById('messages');
             const rowDiv = document.createElement('div');
             rowDiv.className = 'message-row my-message-row';
-            
             const msgBox = document.createElement('div');
             msgBox.className = 'message-box my-message';
             msgBox.id = msgId; 
@@ -282,7 +298,6 @@
             rowDiv.appendChild(msgBox);
             messages.appendChild(rowDiv);
             messages.scrollTop = messages.scrollHeight;
-            
             inputField.value = ""; 
         }
     }
