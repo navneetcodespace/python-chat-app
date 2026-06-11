@@ -7,9 +7,10 @@ from pydantic import BaseModel
 from typing import Dict, List
 import bcrypt
 
+# Database models import karna
 from database import SessionLocal, User, Room, RoomMember, Message
 
-app = FastAPI(title="Secure Chat App Backend")
+app = FastAPI(title="Secure Chat & Video App Backend")
 
 def get_db():
     db = SessionLocal()
@@ -46,6 +47,30 @@ class RoomJoin(BaseModel):
 def get_frontend():
     return FileResponse("index.html")
 
+# --- ADMIN / DASHBOARD ROUTES ---
+@app.get("/admin/users")
+def get_all_users(db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    return {"total_users_registered": len(users), "user_names": [u.username for u in users]}
+
+@app.get("/admin/live")
+def get_live_connections():
+    live_data = {}
+    total_live_users = 0
+    for room_name, connections in manager.active_rooms.items():
+        count = len(connections)
+        live_data[room_name] = count
+        total_live_users += count
+    return {"total_live_users_right_now": total_live_users, "rooms_data": live_data}
+
+@app.get("/admin/db-stats")
+def get_db_stats(db: Session = Depends(get_db)):
+    return {
+        "total_registered_users": db.query(User).count(),
+        "total_created_rooms": db.query(Room).count(),
+        "total_chat_messages": db.query(Message).count()
+    }
+
 # --- AUTH ROUTES ---
 @app.post("/signup")
 def signup(user: UserAuth, db: Session = Depends(get_db)):
@@ -54,7 +79,7 @@ def signup(user: UserAuth, db: Session = Depends(get_db)):
         
     existing_user = db.query(User).filter(User.username == user.username).first()
     if existing_user:
-        raise HTTPException(status_code=400, detail="Username already taken. Please choose a unique handle.")
+        raise HTTPException(status_code=400, detail="Username already taken.")
     
     hashed_pw = get_password_hash(user.password)
     new_user = User(username=user.username, password_hash=hashed_pw)
@@ -88,7 +113,6 @@ def create_room(room_data: RoomCreate, db: Session = Depends(get_db)):
     new_member = RoomMember(user_id=user.id, room_id=new_room.id)
     db.add(new_member)
     db.commit()
-    
     return {"message": "Room created successfully!", "room_name": new_room.name}
 
 @app.post("/rooms/join")
@@ -106,18 +130,14 @@ def join_room(room_data: RoomJoin, db: Session = Depends(get_db)):
         new_member = RoomMember(user_id=user.id, room_id=room.id)
         db.add(new_member)
         db.commit()
-        
     return {"message": f"Successfully joined {room.name}"}
 
 @app.get("/rooms/{username}")
 def get_user_rooms(username: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == username).first()
-    if not user:
-        return []
-        
+    if not user: return []
     memberships = db.query(RoomMember).filter(RoomMember.user_id == user.id).all()
     room_ids = [m.room_id for m in memberships]
-    
     user_rooms = db.query(Room).filter(Room.id.in_(room_ids)).all()
     return [{"room_name": r.name} for r in user_rooms]
 
@@ -164,7 +184,7 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
 
     await manager.connect(websocket, room_name)
     
-    # Past messages load karna (Plain text history)
+    # Load Past Messages (Plain text history)
     past_messages = db.query(Message).filter(Message.room_id == room.id).order_by(Message.timestamp).all()
     for msg in past_messages:
         sender = db.query(User).filter(User.id == msg.user_id).first()
@@ -178,46 +198,39 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
             
             try:
                 payload = json.loads(raw_data)
+                msg_type = payload.get("type")
                 
-                # 1. NAYA MESSAGE AAYA HAI
-                if payload.get("type") == "chat_message":
+                # 1. NORMAL CHAT MESSAGE
+                if msg_type == "chat_message":
                     msg_id = payload.get("id")
                     text_content = payload.get("text")
                     
+                    # Save to DB
                     new_msg = Message(text=text_content, room_id=room.id, user_id=user.id)
                     db.add(new_msg)
                     db.commit()
                     
-                    # Sender ko turant SENT ACK (✓) bhejo
-                    ack_receipt = {
-                        "type": "ack",
-                        "id": msg_id,
-                        "status": "sent"
-                    }
+                    # Send Sent ACK (Single Tick)
+                    ack_receipt = {"type": "ack", "id": msg_id, "status": "sent"}
                     await websocket.send_text(json.dumps(ack_receipt))
                     
-                    # NAYA LOGIC: Baaki room walo ko ab JSON format me message bhejo
-                    broadcast_data = {
-                        "type": "chat_message",
-                        "id": msg_id,
-                        "user_id": username,
-                        "text": text_content
-                    }
+                    # Broadcast to room
+                    broadcast_data = {"type": "chat_message", "id": msg_id, "user_id": username, "text": text_content}
                     await manager.broadcast(json.dumps(broadcast_data), room_name, exclude_ws=websocket)
                 
-                # 2. DELIVERY RECEIPT AAYI HAI SAMNE WALE SE
-                elif payload.get("type") == "delivery_ack":
+                # 2. DELIVERY RECEIPT (Double Tick)
+                elif msg_type == "delivery_ack":
                     delivered_msg_id = payload.get("message_id")
-                    
-                    # Original sender ko DELIVERED STATUS (✓✓) update bhej do
-                    status_update = {
-                        "type": "status_update",
-                        "id": delivered_msg_id,
-                        "status": "delivered"
-                    }
+                    status_update = {"type": "status_update", "id": delivered_msg_id, "status": "delivered"}
                     await manager.broadcast(json.dumps(status_update), room_name, exclude_ws=websocket)
                     
+                # 3. WEBRTC SIGNALING (Do Not Save to Database)
+                elif msg_type in ["webrtc_offer", "webrtc_answer", "webrtc_ice_candidate"]:
+                    # Just pass the signaling message to the other user in the room
+                    await manager.broadcast(json.dumps(payload), room_name, exclude_ws=websocket)
+                    
             except json.JSONDecodeError:
+                # Fallback for plain text
                 new_msg = Message(text=raw_data, room_id=room.id, user_id=user.id)
                 db.add(new_msg)
                 db.commit()
@@ -228,32 +241,3 @@ async def chat_endpoint(websocket: WebSocket, room_name: str, username: str):
         await manager.broadcast(f"** {username} left the chat **", room_name)
     finally:
         db.close()
-
-@app.get("/admin/live")
-def get_live_connections():
-    live_data = {}
-    total_live_users = 0
-    
-    # manager.active_rooms check karega ki kis room mein kitne WebSockets hain
-    for room_name, connections in manager.active_rooms.items():
-        count = len(connections)
-        live_data[room_name] = count
-        total_live_users += count
-        
-    return {
-        "total_live_users_right_now": total_live_users,
-        "rooms_data": live_data
-    }
-
-@app.get("/admin/db-stats")
-def get_db_stats(db: Session = Depends(get_db)):
-    # .count() directly table ke total rows gin leta hai
-    total_users = db.query(User).count()
-    total_rooms = db.query(Room).count()
-    total_messages = db.query(Message).count()
-    
-    return {
-        "total_registered_users": total_users,
-        "total_created_rooms": total_rooms,
-        "total_chat_messages": total_messages
-    }

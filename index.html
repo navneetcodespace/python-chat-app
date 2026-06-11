@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secure Chat & Video App</title>
+    <title>Native WebRTC Secure Chat</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
         .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); width: 100%; max-width: 600px; }
@@ -15,36 +15,28 @@
         
         #dashboard-section, #chat-section { display: none; }
         
-        .room-actions { background: #f9f9f9; padding: 15px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #eee; }
-        .room-actions h4 { margin-top: 0; margin-bottom: 10px; color: #555; }
-        .room-btn { background-color: #e4e6eb; color: black; margin-bottom: 5px; text-align: left; font-weight: bold;}
-        .room-btn:hover { background-color: #d8dadf; }
-
         /* --- CHAT UI STYLING --- */
-        #messages { height: 400px; border: 1px solid #ddd; border-radius: 8px; overflow-y: scroll; padding: 15px; margin-bottom: 10px; background-color: #e5ddd5; display: flex; flex-direction: column; }
+        #messages { height: 300px; border: 1px solid #ddd; border-radius: 8px; overflow-y: scroll; padding: 15px; margin-bottom: 10px; background-color: #e5ddd5; display: flex; flex-direction: column; }
         .message-row { display: flex; width: 100%; margin-bottom: 10px; }
         .message-box { max-width: 70%; padding: 8px 12px; border-radius: 8px; font-size: 0.95em; line-height: 1.4; word-wrap: break-word;}
         .other-message { background-color: white; border-top-left-radius: 0; align-self: flex-start; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
         .other-message-row { justify-content: flex-start; }
         .my-message { background-color: #dcf8c6; border-top-right-radius: 0; align-self: flex-end; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
         .my-message-row { justify-content: flex-end; }
-        .system-msg { color: #555; background: #fffde7; padding: 4px 10px; border-radius: 12px; font-style: italic; text-align: center; font-size: 0.8em; margin: 10px auto; width: fit-content; box-shadow: 0 1px 1px rgba(0,0,0,0.1);}
-        .sender-name { font-size: 0.75em; font-weight: bold; color: #0084ff; margin-bottom: 3px; display: block; }
         .msg-tick { font-size: 0.8em; color: #888; margin-left: 8px; display: inline-block; user-select: none; }
+        .sender-name { font-size: 0.75em; font-weight: bold; color: #0084ff; margin-bottom: 3px; display: block; }
         
-        /* Zego Video Container overlay */
-        #zego-video-container { display: none; width: 100vw; height: 100vh; position: fixed; top: 0; left: 0; z-index: 9999; background: #333; }
+        /* --- WEBRTC VIDEO UI --- */
+        #video-container { display: none; gap: 10px; justify-content: space-between; margin-bottom: 10px; background: #000; padding: 10px; border-radius: 8px;}
+        video { width: 48%; border-radius: 8px; background: #222; aspect-ratio: 4/3; object-fit: cover;}
     </style>
-    <script src="https://unpkg.com/@zegocloud/zego-uikit-prebuilt/zego-uikit-prebuilt.js"></script>
 </head>
 <body>
-
-<div id="zego-video-container"></div>
 
 <div class="container">
     <div id="auth-section">
         <h2>Secure Login / Signup</h2>
-        <div class="input-group"><input type="text" id="username" placeholder="Enter Username (e.g. rahul_123)"></div>
+        <div class="input-group"><input type="text" id="username" placeholder="Enter Username"></div>
         <div class="input-group"><input type="password" id="password" placeholder="Enter Password"></div>
         <button onclick="login()">Login</button>
         <button onclick="signup()" style="background-color: #4CAF50;">Sign Up</button>
@@ -52,27 +44,11 @@
     </div>
 
     <div id="dashboard-section">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h2>Dashboard</h2>
-            <button onclick="logout()" style="width: auto; background-color: #f44336; padding: 5px 10px;">Logout</button>
-        </div>
+        <h2>Dashboard</h2>
         <p style="text-align: center;">Welcome, <b id="display-user"></b>!</p>
-        
-        <div class="room-actions">
-            <h4>Create a New Room</h4>
-            <input type="text" id="createRoomName" placeholder="Room Name">
-            <input type="password" id="createRoomKey" placeholder="Set a Secret Key">
-            <button onclick="createRoom()" style="background-color: #ff9800;">Create Room</button>
-        </div>
-
-        <div class="room-actions">
-            <h4>Join an Existing Room</h4>
-            <input type="text" id="joinRoomName" placeholder="Room Name">
-            <input type="password" id="joinRoomKey" placeholder="Room's Secret Key">
-            <button onclick="joinRoomAPI()" style="background-color: #2196F3;">Join Room</button>
-        </div>
-        
-        <h3>My Active Rooms</h3>
+        <div class="input-group"><input type="text" id="joinRoomName" placeholder="Room Name"></div>
+        <div class="input-group"><input type="password" id="joinRoomKey" placeholder="Secret Key"></div>
+        <button onclick="joinRoomAPI()">Join Room</button>
         <div id="room-list"></div>
     </div>
 
@@ -80,9 +56,14 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <h2 id="room-title" style="margin: 0;">Room Name</h2>
             <div>
-                <button onclick="startVideoCall()" style="background-color: #4CAF50; width: auto; padding: 8px 12px; margin-right: 5px;">🎥 Call</button>
+                <button onclick="startCall()" style="background-color: #4CAF50; width: auto; padding: 8px 12px; margin-right: 5px;">🎥 Call</button>
                 <button onclick="leaveRoom()" style="width: auto; background-color: #f44336; padding: 8px 12px;">Back</button>
             </div>
+        </div>
+
+        <div id="video-container">
+            <video id="localVideo" autoplay muted playsinline></video>
+            <video id="remoteVideo" autoplay playsinline></video>
         </div>
         
         <div id="messages"></div>
@@ -93,108 +74,59 @@
     </div>
 </div>
 
-<script src="https://unpkg.com/@zegocloud/zego-uikit-prebuilt/zego-uikit-prebuilt.js"></script>
-
 <script>
     let currentUser = "";
     let ws = null;
-    let currentRoomName = ""; // Room name store karne ke liye
+    let currentRoomName = ""; 
 
-    // --- VIDEO CALL LOGIC ---
-    function startVideoCall() {
-        // Yahan apni Zego details daaliye
-        const appID = 404470069; // e.g. 404470069 (Bina quotes ke likhein)
-        const serverSecret = "41c9f266cebd96dbdb2f1b187f1e7147"; // Quotes ke andar likhein
-        
-        const roomID = currentRoomName; // Chat wale room ko hi video room bana lenge
-        const userID = currentUser + "_" + Math.floor(Math.random() * 1000); // Unique Zego ID
-        const userName = currentUser;
+    // --- NATIVE WEBRTC LOGIC ---
+    let localStream;
+    let peerConnection;
+    // Free Google STUN Servers to bypass firewalls
+    const rtcConfig = { 'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}, {'urls': 'stun:stun1.l.google.com:19302'}] };
 
-        // Generate Token for Call
-        const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(appID, serverSecret, roomID, userID, userName);
-        
-        // Zego Instance Banayein
-        const zp = ZegoUIKitPrebuilt.create(kitToken);
-        
-        // Call UI ko screen par display karein
-        const container = document.getElementById('zego-video-container');
-        container.style.display = "block";
+    // Step 1: Initialize PeerConnection and Camera
+    async function initWebRTC() {
+        if (!peerConnection) {
+            peerConnection = new RTCPeerConnection(rtcConfig);
+            
+            // Jab samne wale ka video aaye, toh remoteVideo tag me daal do
+            peerConnection.ontrack = event => {
+                document.getElementById('remoteVideo').srcObject = event.streams[0];
+            };
 
-        zp.joinRoom({
-            container: container,
-            scenario: {
-                mode: ZegoUIKitPrebuilt.GroupCall, // Multiple log bhi add ho sakte hain
-            },
-            showPreJoinView: true,
-            onLeaveRoom: () => {
-                // Call katne par UI wapas chhupa dein
-                container.style.display = "none";
+            // Jab P2P path mile, toh WebSocket se doosre user ko bhejo
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({ type: 'webrtc_ice_candidate', candidate: event.candidate, user_id: currentUser }));
+                }
+            };
+
+            // Camera aur Mic ki permission lo
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('localVideo').srcObject = localStream;
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+            } catch(e) {
+                alert("Camera ya Mic ka access deny ho gaya hai!");
+                console.error(e);
             }
-        });
+        }
     }
 
-
-    // --- AUTHENTICATION API ---
-    async function signup() {
-        const u = document.getElementById("username").value;
-        const p = document.getElementById("password").value;
-        try {
-            const res = await fetch("/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
-            if(res.ok) { alert((await res.json()).message); } else { document.getElementById("auth-error").innerText = (await res.json()).detail; }
-        } catch (err) { document.getElementById("auth-error").innerText = "Server error."; }
+    // Step 2: "Call" button dabane par Offer banana
+    async function startCall() {
+        document.getElementById('video-container').style.display = 'flex';
+        await initWebRTC();
+        
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        
+        // WebSocket se doosre user ko 'Offer' bhej do
+        ws.send(JSON.stringify({ type: 'webrtc_offer', offer: offer, user_id: currentUser }));
     }
 
-    async function login() {
-        const u = document.getElementById("username").value;
-        const p = document.getElementById("password").value;
-        try {
-            const res = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
-            if(res.ok) {
-                currentUser = (await res.json()).username;
-                document.getElementById("auth-section").style.display = "none";
-                document.getElementById("dashboard-section").style.display = "block";
-                document.getElementById("display-user").innerText = currentUser;
-                document.getElementById("password").value = ""; 
-                loadMyRooms();
-            } else { document.getElementById("auth-error").innerText = (await res.json()).detail; }
-        } catch (err) { document.getElementById("auth-error").innerText = "Server error."; }
-    }
-
-    function logout() {
-        currentUser = "";
-        document.getElementById("dashboard-section").style.display = "none";
-        document.getElementById("auth-section").style.display = "block";
-    }
-
-    // --- DASHBOARD API ---
-    async function loadMyRooms() {
-        const res = await fetch(`/rooms/${currentUser}`);
-        const rooms = await res.json();
-        const list = document.getElementById("room-list");
-        list.innerHTML = "";
-        if (rooms.length === 0) { list.innerHTML = "<p style='color: gray; text-align: center;'>You haven't joined any rooms yet.</p>"; return; }
-        rooms.forEach(room => {
-            const btn = document.createElement("button"); btn.className = "room-btn"; btn.innerText = "📁 Enter: " + room.room_name;
-            btn.onclick = () => enterChat(room.room_name); list.appendChild(btn);
-        });
-    }
-
-    async function createRoom() {
-        const rName = document.getElementById("createRoomName").value; const rKey = document.getElementById("createRoomKey").value;
-        if(!rName || !rKey) return alert("Please fill both fields");
-        const res = await fetch("/rooms/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser }) });
-        if(res.ok) { document.getElementById("createRoomName").value = ""; document.getElementById("createRoomKey").value = ""; loadMyRooms(); }
-        else { alert((await res.json()).detail); }
-    }
-
-    async function joinRoomAPI() {
-        const rName = document.getElementById("joinRoomName").value; const rKey = document.getElementById("joinRoomKey").value;
-        if(!rName || !rKey) return alert("Please fill both fields");
-        const res = await fetch("/rooms/join", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser }) });
-        if(res.ok) { document.getElementById("joinRoomName").value = ""; document.getElementById("joinRoomKey").value = ""; loadMyRooms(); }
-        else { alert((await res.json()).detail); }
-    }
-
+    // --- HELPER FUNCTION: Chat UI ---
     function appendMessageToUI(sender, text, isHistory = false) {
         const messages = document.getElementById('messages');
         const rowDiv = document.createElement('div');
@@ -216,65 +148,102 @@
         messages.scrollTop = messages.scrollHeight; 
     }
 
-    // --- SMART CHAT LOGIC ---
+    // --- AUTHENTICATION API ---
+    async function signup() {
+        // ... (Aapka purana signup code same rahega) ...
+        const u = document.getElementById("username").value; const p = document.getElementById("password").value;
+        const res = await fetch("/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
+        if(res.ok) alert((await res.json()).message); else alert("Error signing up.");
+    }
+
+    async function login() {
+        const u = document.getElementById("username").value; const p = document.getElementById("password").value;
+        const res = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
+        if(res.ok) {
+            currentUser = (await res.json()).username;
+            document.getElementById("auth-section").style.display = "none";
+            document.getElementById("dashboard-section").style.display = "block";
+            document.getElementById("display-user").innerText = currentUser;
+            loadMyRooms();
+        } else alert("Invalid Credentials");
+    }
+
+    function logout() { location.reload(); }
+
+    async function loadMyRooms() {
+        const res = await fetch(`/rooms/${currentUser}`);
+        const rooms = await res.json();
+        const list = document.getElementById("room-list");
+        list.innerHTML = "";
+        rooms.forEach(room => {
+            const btn = document.createElement("button"); btn.innerText = "📁 Enter: " + room.room_name;
+            btn.onclick = () => enterChat(room.room_name); list.appendChild(btn);
+        });
+    }
+
+    async function joinRoomAPI() {
+        const rName = document.getElementById("joinRoomName").value; const rKey = document.getElementById("joinRoomKey").value;
+        const res = await fetch("/rooms/join", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room_name: rName, secret_key: rKey, username: currentUser }) });
+        if(res.ok) loadMyRooms(); else alert("Error joining room.");
+    }
+
+    // --- SMART CHAT & SIGNALING LOGIC ---
     function enterChat(roomName) {
-        currentRoomName = roomName; // Save for video call
+        currentRoomName = roomName;
         document.getElementById("dashboard-section").style.display = "none";
         document.getElementById("chat-section").style.display = "block";
         document.getElementById("room-title").innerText = roomName;
         document.getElementById("messages").innerHTML = ""; 
         
         const wsProtocol = window.location.protocol === "https:" ? "wss://" : "ws://";
-        const wsUrl = `${wsProtocol}${window.location.host}/ws/${roomName}/${currentUser}`; 
-        ws = new WebSocket(wsUrl);
+        ws = new WebSocket(`${wsProtocol}${window.location.host}/ws/${roomName}/${currentUser}`);
         
-        ws.onmessage = function(event) {
-            if(event.data.startsWith('**')) {
-                const messages = document.getElementById('messages');
-                const rowDiv = document.createElement('div');
-                const msgBox = document.createElement('div');
-                msgBox.className = 'system-msg';
-                msgBox.innerText = event.data;
-                rowDiv.style.width = "100%";
-                rowDiv.appendChild(msgBox);
-                messages.appendChild(rowDiv);
-                messages.scrollTop = messages.scrollHeight; 
-                return;
-            }
-
+        ws.onmessage = async function(event) {
+            // JSON MESSAGES (Signaling & Status)
             if (event.data.startsWith('{')) {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.type === "ack" && data.status === "sent") {
-                        const msgBox = document.getElementById(data.id);
-                        if (msgBox) {
-                            const tickElement = msgBox.querySelector('.msg-tick');
-                            if (tickElement) tickElement.innerText = "✓"; 
-                        }
-                        return; 
+                    
+                    // --- WEBRTC SIGNALING HANDLERS ---
+                    if (data.type === 'webrtc_offer' && data.user_id !== currentUser) {
+                        document.getElementById('video-container').style.display = 'flex';
+                        await initWebRTC();
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        ws.send(JSON.stringify({ type: 'webrtc_answer', answer: answer, user_id: currentUser }));
                     }
-                    if (data.type === "status_update" && data.status === "delivered") {
-                        const msgBox = document.getElementById(data.id);
-                        if (msgBox) {
-                            const tickElement = msgBox.querySelector('.msg-tick');
-                            if (tickElement) tickElement.innerText = "✓✓"; 
-                        }
-                        return; 
+                    
+                    else if (data.type === 'webrtc_answer' && data.user_id !== currentUser) {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
                     }
-                    if (data.type === "chat_message") {
+                    
+                    else if (data.type === 'webrtc_ice_candidate' && data.user_id !== currentUser) {
+                        if (peerConnection) {
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        }
+                    }
+
+                    // --- CHAT MESSAGE HANDLERS ---
+                    else if (data.type === "ack" && data.status === "sent") {
+                        const msgBox = document.getElementById(data.id);
+                        if (msgBox) msgBox.querySelector('.msg-tick').innerText = "✓"; 
+                    }
+                    else if (data.type === "status_update" && data.status === "delivered") {
+                        const msgBox = document.getElementById(data.id);
+                        if (msgBox) msgBox.querySelector('.msg-tick').innerText = "✓✓"; 
+                    }
+                    else if (data.type === "chat_message") {
                         appendMessageToUI(data.user_id, data.text);
-                        const deliveryAck = { type: "delivery_ack", message_id: data.id };
-                        ws.send(JSON.stringify(deliveryAck));
-                        return;
+                        ws.send(JSON.stringify({ type: "delivery_ack", message_id: data.id }));
                     }
                 } catch(e) {}
-            }
-
-            const splitIndex = event.data.indexOf(':');
-            if (splitIndex !== -1) {
-                const sender = event.data.substring(0, splitIndex);
-                const text = event.data.substring(splitIndex + 1).trim();
-                appendMessageToUI(sender, text, true); 
+            } else if (event.data.startsWith('**')) {
+                // System Messages
+            } else {
+                // History text
+                const splitIndex = event.data.indexOf(':');
+                if (splitIndex !== -1) appendMessageToUI(event.data.substring(0, splitIndex), event.data.substring(splitIndex + 1).trim(), true);
             }
         };
     }
@@ -286,26 +255,23 @@
 
         if (messageText.trim() !== "" && ws) {
             const msgId = "msg_" + Date.now();
-            const payload = { type: "chat_message", id: msgId, text: messageText, user_id: currentUser };
-            ws.send(JSON.stringify(payload)); 
+            ws.send(JSON.stringify({ type: "chat_message", id: msgId, text: messageText, user_id: currentUser })); 
             
             const messages = document.getElementById('messages');
-            const rowDiv = document.createElement('div');
-            rowDiv.className = 'message-row my-message-row';
-            const msgBox = document.createElement('div');
-            msgBox.className = 'message-box my-message';
-            msgBox.id = msgId; 
+            const rowDiv = document.createElement('div'); rowDiv.className = 'message-row my-message-row';
+            const msgBox = document.createElement('div'); msgBox.className = 'message-box my-message'; msgBox.id = msgId; 
             msgBox.innerHTML = `${messageText} <span class="msg-tick">🕒</span>`;
-            
-            rowDiv.appendChild(msgBox);
-            messages.appendChild(rowDiv);
-            messages.scrollTop = messages.scrollHeight;
+            rowDiv.appendChild(msgBox); messages.appendChild(rowDiv); messages.scrollTop = messages.scrollHeight;
             inputField.value = ""; 
         }
     }
 
     function leaveRoom() {
-        if(ws) { ws.close(); }
+        if(ws) ws.close();
+        if(localStream) localStream.getTracks().forEach(track => track.stop()); // Camera band karna
+        if(peerConnection) peerConnection.close();
+        peerConnection = null;
+        document.getElementById('video-container').style.display = 'none';
         document.getElementById("chat-section").style.display = "none";
         document.getElementById("dashboard-section").style.display = "block";
     }
